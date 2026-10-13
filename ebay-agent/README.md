@@ -36,7 +36,7 @@ python agent.py "seasonal garden flags to resell"   # a one-off question
 python agent.py                                     # chat mode
 ```
 
-A full research run makes a few dozen tool calls and takes a few minutes. Expect it to cost roughly a dollar or two in Claude API usage; it varies.
+A full research run makes a few dozen tool calls and takes a few minutes. Expect it to cost a few dollars in Claude API usage per run (rough estimate; it depends on how many ideas it checks).
 
 Tool calls are printed as they happen (`-> search_ebay(...)`), so you can watch the agent work.
 
