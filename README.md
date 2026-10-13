@@ -2,4 +2,4 @@
 
 Learning to build AI agents.
 
-- [`ebay-agent/`](ebay-agent/): an agent that researches products to resell on eBay
+- [`ebay-agent/`](ebay-agent/): an agent that finds proven product themes to make and sell on eBay, TikTok Shop and Amazon

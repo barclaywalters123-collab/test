@@ -10,6 +10,7 @@ parameter descriptions, so write them carefully.
 import json
 import statistics
 
+from config import FEE_PER_ORDER, FEE_RATE, TARGET_MARGIN
 from ebay_client import EbayClient, SORTS, SoldDataUnavailable
 
 ebay = EbayClient()
@@ -18,12 +19,12 @@ TOOLS = [
     {
         "name": "research_market",
         "description": (
-            "Demand check for one product idea. Returns, for the search terms: SOLD listings over the last "
-            "`days` days (count, median/low/high sold price, examples), the number of ACTIVE listings, "
-            "sell-through (sold listings / active listings), and the cheapest active listings with shipping "
-            "(a rough sourcing-cost estimate). If sold data can't be fetched, `sold.available` is false and "
-            "`sold.reason` explains why. Report that as unverified; don't estimate it. "
-            "Call this once per idea; run several ideas in parallel."
+            "Demand check for one product idea on eBay. Returns, for the search terms: SOLD listings over the "
+            "last `days` days (count, median/low/high sold price, example titles), the number of ACTIVE "
+            "listings, sell-through (sold listings / active listings), the lowest competitor prices, and "
+            "max_unit_cost: the most you could pay a supplier per unit and still hit the target margin after "
+            "eBay fees. If sold data can't be fetched, `sold.available` is false and `sold.reason` explains "
+            "why. Report that as unverified; don't estimate it. Call this once per idea; run several ideas in parallel."
         ),
         "input_schema": {
             "type": "object",
@@ -39,8 +40,7 @@ TOOLS = [
         "description": (
             "Search ACTIVE eBay listings. Returns up to `limit` listings with item_id, title, price, "
             "shipping cost, condition, seller feedback, and URL, plus total_matches (how many active "
-            "listings exist). Use it to check sourcing options (e.g. add 'lot' or 'wholesale' to the query, "
-            "sort by price_low) or to look at the competition."
+            "listings exist). Use it to look at the competition: how varied the designs are and what they cost."
         ),
         "input_schema": {
             "type": "object",
@@ -59,7 +59,8 @@ TOOLS = [
         "name": "get_item_details",
         "description": (
             "Get full details for one active listing by its item_id (from search_ebay): description, "
-            "brand, location, return policy. Use it to check whether a listing is licensed/branded."
+            "brand, location, return policy. Use it to check whether a design is branded, licensed, or "
+            "a specific shop's original artwork."
         ),
         "input_schema": {
             "type": "object",
@@ -96,8 +97,8 @@ def research_market(query, days=90):
             landed.append(round(price + (ship or 0), 2))
     result["active"] = {
         "active_listings": active["total_matches"],
-        "cheapest_landed_costs": landed[:5],
-        "median_landed_cost_of_cheapest_20": round(statistics.median(landed), 2) if landed else None,
+        "lowest_competitor_prices_with_shipping": landed[:5],
+        "median_of_cheapest_20": round(statistics.median(landed), 2) if landed else None,
         "cheapest_examples": [
             {k: item[k] for k in ("title", "price", "shipping", "condition", "url")}
             for item in active["items"][:3]
@@ -111,6 +112,17 @@ def research_market(query, days=90):
         result["sell_through_pct"] = round(100 * sold_count / active["total_matches"], 1)
     else:
         result["sell_through_pct"] = None
+
+    # Most you can pay per unit: sale - eBay fees - target profit. Assumes the buyer pays shipping.
+    median = result["sold"].get("sold_price_median")
+    if median:
+        result["max_unit_cost"] = {
+            "value": round(median * (1 - FEE_RATE - TARGET_MARGIN) - FEE_PER_ORDER, 2),
+            "assumes": f"median sold price, eBay fees {FEE_RATE:.1%} + ${FEE_PER_ORDER:.2f}, "
+                       f"{TARGET_MARGIN:.0%} target margin, buyer pays shipping",
+        }
+    else:
+        result["max_unit_cost"] = None
     return result
 
 
