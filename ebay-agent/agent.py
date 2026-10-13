@@ -1,7 +1,8 @@
 """eBay product-finder agent.
 
 Usage:
-    python agent.py "noise-cancelling headphones under $150"   # one question
+    python agent.py --research                                 # run the research brief in prompts.py
+    python agent.py "seasonal doormats under $25 to resell"    # one question
     python agent.py                                            # chat mode
 
 The agent loop:
@@ -31,11 +32,11 @@ def load_dotenv(path=Path(__file__).parent / ".env"):
 
 load_dotenv()
 
-from prompts import SYSTEM_PROMPT  # noqa: E402  (import after .env is loaded)
+from prompts import RESEARCH_BRIEF, SYSTEM_PROMPT  # noqa: E402  (import after .env is loaded)
 from tools import TOOLS, ebay, run_tool  # noqa: E402
 
 MODEL = "claude-opus-5-5"
-MAX_TURNS = 15  # safety cap: max Claude calls per question, so a confused agent can't loop forever
+MAX_TURNS = 40  # safety cap: max Claude calls per question, so a confused agent can't loop forever
 
 client = anthropic.Anthropic()
 
@@ -43,17 +44,19 @@ client = anthropic.Anthropic()
 def run_agent(messages):
     """Run the agent loop on `messages` (modified in place). Returns Claude's final text."""
     for _ in range(MAX_TURNS):
-        response = client.beta.messages.create(
+        # Streaming lets a long final report finish without hitting HTTP timeouts.
+        with client.beta.messages.stream(
             model=MODEL,
-            max_tokens=16000,
+            max_tokens=64000,
             system=SYSTEM_PROMPT,
             tools=TOOLS,
             messages=messages,
-            output_config={"effort": "medium"},  # low = faster/cheaper, high = more thorough
+            output_config={"effort": "high"},  # research benefits from thoroughness; "medium"/"low" are cheaper
             # If a safety classifier declines the request, retry on Anthropic's recommended fallback model.
             betas=["server-side-fallback-2026-07-01"],
             fallbacks="default",
-        )
+        ) as stream:
+            response = stream.get_final_message()
 
         if response.stop_reason == "refusal":
             return "Sorry, Claude declined this request."
@@ -62,7 +65,10 @@ def run_agent(messages):
         messages.append({"role": "assistant", "content": response.content})
 
         if response.stop_reason != "tool_use":
-            return "".join(b.text for b in response.content if b.type == "text")
+            text = "".join(b.text for b in response.content if b.type == "text")
+            if response.stop_reason == "max_tokens":
+                text += "\n\n[Cut off: the response hit max_tokens.]"
+            return text
 
         # Run every tool Claude asked for; send all results back in a single message.
         results = []
@@ -88,12 +94,17 @@ def main():
 
     messages = []
 
-    if len(sys.argv) > 1:
-        messages.append({"role": "user", "content": " ".join(sys.argv[1:])})
+    args = sys.argv[1:]
+    first = RESEARCH_BRIEF if args == ["--research"] else " ".join(args)
+    if first:
+        messages.append({"role": "user", "content": first})
         print(run_agent(messages))
-        return
+        if args != ["--research"]:
+            return
+        print("\nAsk follow-up questions, or Ctrl+C to quit.")
+    else:
+        print("What should I research on eBay? (Ctrl+C to quit)")
 
-    print("What are you looking for on eBay? (Ctrl+C to quit)")
     while True:
         try:
             question = input("\nyou> ").strip()
